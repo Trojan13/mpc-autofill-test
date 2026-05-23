@@ -1,0 +1,63 @@
+version: "3.8"
+
+services:
+  # --- Backend API ---
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/mpc_autofill.db
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=http://localhost:8000/api/sources/google-drive/callback
+      - S3_ENDPOINT_URL=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET_NAME=mpc-autofill-uploads
+      - S3_PUBLIC_URL=http://localhost:9000/mpc-autofill-uploads
+      - ALLOWED_ORIGINS=["http://localhost:3000"]
+    volumes:
+      - backend-data:/app/data
+    depends_on:
+      - minio
+
+  # --- Frontend ---
+  frontend:
+    build: ./frontend-v2
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+
+  # --- MinIO (S3-compatible storage) ---
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio-data:/data
+
+  # --- MinIO bucket setup ---
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+        sleep 5;
+        mc alias set local http://minio:9000 minioadmin minioadmin;
+        mc mb local/mpc-autofill-uploads --ignore-existing;
+        mc anonymous set download local/mpc-autofill-uploads;
+        exit 0;
+      "
+
+volumes:
+  backend-data:
+  minio-data:
